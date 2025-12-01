@@ -1,41 +1,115 @@
-name: Deploy React Frontend to EC2
+name: Deploy React Frontend (Self-hosted)
 
 on:
- push:
-  branches:
-   - main  # Trigger deployment on push to main branch
+  push:
+    branches:
+      - main
+
+env:
+  # If your frontend is at the repo root, keep '.'.
+  # If your frontend lives in ./frontend or ./client, set it here (e.g. './frontend').
+  FRONTEND_DIR: '.'
+  DEPLOY_DIR: '/var/www/react-app'
 
 jobs:
- build-and-deploy:
-  runs-on: self-hosted  # Use your EC2 GitHub runner
- 
-  steps:
-   - name: Checkout repository
-     uses: actions/checkout@v3
+  build-and-deploy:
+    runs-on: self-hosted
 
-   - name: Setup Node.js
-     uses: actions/setup-node@v3
-     with:
-      node-version: '20'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-   - name: Install dependencies
-     run: npm ci
+      - name: Debug workspace (show where we are)
+        run: |
+          echo "WORKING DIR:"
+          pwd
+          echo "LIST:"
+          ls -la
+          echo "FRONTEND_DIR = ${{ env.FRONTEND_DIR }}"
 
-   - name: Build React App
-     run: npm run build
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
 
-   - name: Deploy React App to Nginx
-     run: |
-      # Create deployment folder
-      sudo mkdir -p /var/www/react-app
-      
-      # Copy build files to deployment folder
-      sudo cp -r build/* /var/www/react-app/
-      
-      # Clear default Nginx HTML and copy the app
-      sudo rm -rf /usr/share/nginx/html/*
-      sudo cp -r /var/www/react-app/* /usr/share/nginx/html/
-      
-      # Restart Nginx to serve the new app
-      sudo systemctl restart nginx
+      - name: Show node/npm versions
+        run: |
+          node -v
+          npm -v
 
+      - name: Show package.json scripts (debug)
+        run: |
+          if [ -f "${{ env.FRONTEND_DIR }}/package.json" ]; then
+            echo "package.json found in ${{ env.FRONTEND_DIR }}"
+            jq '.scripts' "${{ env.FRONTEND_DIR }}/package.json" || cat "${{ env.FRONTEND_DIR }}/package.json" | sed -n '1,200p'
+          else
+            echo "ERROR: package.json not found in ${{ env.FRONTEND_DIR }}"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: npm ci
+
+      - name: Build React app
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: npm run build
+
+      - name: Verify build output (build/ or dist/)
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: |
+          set -e
+          echo "Checking for build/ or dist/ ..."
+          if [ -d build ]; then
+            echo "Found build/ directory"
+            ls -la build | sed -n '1,200p'
+            BUILD_SRC="$(pwd)/build"
+          elif [ -d dist ]; then
+            echo "Found dist/ directory — copying to build/ for compatibility"
+            rm -rf build || true
+            mkdir -p build
+            cp -r dist/* build/
+            ls -la build | sed -n '1,200p'
+            BUILD_SRC="$(pwd)/build"
+          else
+            echo "ERROR: No build/ or dist/ directory found after npm run build."
+            echo "Workspace listing (frontend dir):"
+            ls -la
+            exit 1
+          fi
+          echo "##[set-output name=build_src]$BUILD_SRC"
+        id: verify_build
+
+      - name: Deploy to Nginx (copy files and restart)
+        run: |
+          # get the build source (from previous step's computed path)
+          BUILD_SRC="${{ steps.verify_build.outputs.build_src }}"
+          echo "Deploying from: $BUILD_SRC"
+          if [ -z "$BUILD_SRC" ]; then
+            echo "ERROR: BUILD_SRC is empty"
+            exit 1
+          fi
+
+          # create deploy dir and copy build contents (use dot to copy contents, including index.html)
+          sudo mkdir -p "${{ env.DEPLOY_DIR }}"
+          sudo rm -rf "${{ env.DEPLOY_DIR }}"/* || true
+          sudo cp -r "${BUILD_SRC}/." "${{ env.DEPLOY_DIR }}/"
+
+          # (Optional) replace nginx default site with this app - change if you prefer serving from DEPLOY_DIR directly
+          sudo rm -rf /usr/share/nginx/html/* || true
+          sudo cp -r "${{ env.DEPLOY_DIR }}/." /usr/share/nginx/html/
+
+          # set permissions so nginx can read files (adjust nginx user if different)
+          # common nginx user: nginx or www-data; try both fallbacks
+          if id -u nginx >/dev/null 2>&1; then
+            sudo chown -R nginx:nginx "${{ env.DEPLOY_DIR }}"
+            sudo chown -R nginx:nginx /usr/share/nginx/html
+          elif id -u www-data >/dev/null 2>&1; then
+            sudo chown -R www-data:www-data "${{ env.DEPLOY_DIR }}"
+            sudo chown -R www-data:www-data /usr/share/nginx/html
+          fi
+          sudo chmod -R 755 "${{ env.DEPLOY_DIR }}"
+          sudo chmod -R 755 /usr/share/nginx/html
+
+          # restart nginx
+          sudo systemctl restart nginx
