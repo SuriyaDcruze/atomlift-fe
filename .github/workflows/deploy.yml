@@ -1,120 +1,25 @@
-name: Deploy React Frontend (Self-hosted)
+name: CI/CD Deploy Node App to EC2 (Self Hosted)
 
 on:
   push:
     branches:
       - main
 
-env:
-  FRONTEND_DIR: './frontend'          # change if your frontend folder is different
-  DEPLOY_DIR: '/home/ec2-user/frontend' # where to copy built files on the runner
-
 jobs:
   deploy:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Debug workspace
+      - name: Install Dependencies
         run: |
-          echo "WORKING DIR: $(pwd)"
-          echo "Repo contents:"
-          ls -la
-          echo "FRONTEND_DIR=${{ env.FRONTEND_DIR }}"
-          echo "FRONTEND contents:"
-          ls -la "${{ env.FRONTEND_DIR }}" || true
+          npm install
+          npm run build
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Show node/npm versions
+      - name: Restart PM2 App
         run: |
-          node -v
-          npm -v
-
-      - name: Install dependencies (try npm ci, fallback to npm install)
-        working-directory: ${{ env.FRONTEND_DIR }}
-        run: |
-          set -o pipefail
-          echo "Attempting npm ci..."
-          npm ci 2>&1 | tee npm-ci.log || true
-          CI_EXIT=${PIPESTATUS[0]}
-          if [ "$CI_EXIT" -eq 0 ]; then
-            echo "npm ci succeeded."
-          else
-            echo "npm ci failed (exit $CI_EXIT). Last lines:"
-            tail -n 200 npm-ci.log || true
-            echo "Falling back to npm install..."
-            npm install --no-audit --no-fund 2>&1 | tee npm-install.log || true
-            INSTALL_EXIT=${PIPESTATUS[0]}
-            if [ "$INSTALL_EXIT" -eq 0 ]; then
-              echo "npm install succeeded."
-            else
-              echo "Both npm ci and npm install failed. See logs above."
-              exit 1
-            fi
-          fi
-
-      - name: Build React app
-        working-directory: ${{ env.FRONTEND_DIR }}
-        run: |
-          echo "Running build..."
-          npm run build 2>&1 | tee build.log || (tail -n 200 build.log && exit 1)
-
-      - name: Verify build output (support build/ and dist/)
-        id: verify_build
-        working-directory: ${{ env.FRONTEND_DIR }}
-        run: |
-          set -e
-          echo "Looking for build/ or dist/ in $PWD ..."
-          if [ -d build ]; then
-            BUILD_SRC="$(pwd)/build"
-            echo "Found build/ -> $BUILD_SRC"
-          elif [ -d dist ]; then
-            echo "Found dist/ -> normalizing to build/"
-            rm -rf build || true
-            mkdir -p build
-            cp -r dist/* build/
-            BUILD_SRC="$(pwd)/build"
-          else
-            echo "ERROR: No build/ or dist/ directory found after npm run build."
-            echo "Files in frontend dir:"
-            ls -la
-            exit 1
-          fi
-          echo "build_src=$BUILD_SRC" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy build to DEPLOY_DIR
-        run: |
-          set -e
-          BUILD_SRC="${{ steps.verify_build.outputs.build_src }}"
-          echo "Deploying from $BUILD_SRC to ${{ env.DEPLOY_DIR }}"
-
-          # prepare deploy directory
-          sudo rm -rf "${{ env.DEPLOY_DIR }}" || true
-          sudo mkdir -p "${{ env.DEPLOY_DIR }}"
-          sudo cp -r "${BUILD_SRC}/." "${{ env.DEPLOY_DIR }}/"
-
-          # ensure permissions so nginx (or your web user) can read files
-          if id -u nginx >/dev/null 2>&1; then
-            sudo chown -R nginx:nginx "${{ env.DEPLOY_DIR }}"
-          elif id -u www-data >/dev/null 2>&1; then
-            sudo chown -R www-data:www-data "${{ env.DEPLOY_DIR }}"
-          else
-            sudo chmod -R 755 "${{ env.DEPLOY_DIR }}"
-          fi
-
-      - name: (Optional) Copy to Nginx html folder and restart
-        run: |
-          # If you serve from /usr/share/nginx/html replace below with your preference
-          sudo rm -rf /usr/share/nginx/html/* || true
-          sudo cp -r "${{ env.DEPLOY_DIR }}/." /usr/share/nginx/html/
-          sudo nginx -t
-          sudo systemctl restart nginx
-
-      - name: Done
-        run: echo "Deployment finished successfully."
+          pm2 delete atomlift || true
+          pm2 start npm --name atomlift -- run start --instances max
+          pm2 save
