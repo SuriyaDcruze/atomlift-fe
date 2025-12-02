@@ -66,48 +66,29 @@ jobs:
 
   deploy:
     needs: build-and-test
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@master
         with:
-          node-version: 18.x
-          cache: 'npm'
-
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: Build Application
-        run: npm run build
-
-      - name: Stop Previous PM2 Instance
-        run: |
-          pm2 delete atomlift || true
-          pm2 save
-
-      - name: Start Application with PM2
-        run: |
-          pm2 start npm --name atomlift -- run start --instances max
-          pm2 save
-          pm2 startup
-        env:
-          PM2_HOME: /home/${{ secrets.EC2_USER }}/.pm2
-
-      - name: Verify Application Health
-        run: |
-          sleep 5
-          pm2 status atomlift
-
-      - name: Notify Deployment Success
-        if: success()
-        run: echo "✅ Deployment to EC2 successful!"
-
-      - name: Notify Deployment Failure
-        if: failure()
-        run: echo "❌ Deployment failed!"
-
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script: |
+            cd /path/to/atomlift-fe
+            git pull origin main
+            npm ci
+            npm run build
+            pm2 delete atomlift || true
+            pm2 start npm --name atomlift -- run start --instances max
+            pm2 save
+            pm2 startup
+            sleep 5
+            pm2 status atomlift
+            echo "✅ Deployment to EC2 successful!"
