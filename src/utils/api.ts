@@ -1,6 +1,6 @@
 // API configuration
-//const API_BASE_URL = 'https://atomlift.technuob.com' ; // Change this to your backend URL
-const API_BASE_URL = 'https://atomlift.technuob.com';
+//const API_BASE_URL = 'https://admin.careelevators.in' ; // Change this to your backend URL
+const API_BASE_URL = 'https://admin.careelevators.in';
 
 // API endpoints
 export const API_ENDPOINTS = {
