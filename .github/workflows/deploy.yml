@@ -1,101 +1,101 @@
-# name: CI/CD Deploy Node App to EC2 (Self Hosted)
-
-# on:
-#   push:
-#     branches:
-#       - main
-
-# jobs:
-#   deploy:
-#     runs-on: self-hosted
-
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v4
-
-#       - name: Install Dependencies
-#         run: |
-#           npm install
-#           npm run build
-
-#       - name: Restart PM2 App
-#         run: |
-#           pm2 delete atomlift || true
-
-name: CI/CD Deploy Atom Lift Frontend to EC2
+name: CI/CD Deploy Node App to EC2 (Self Hosted)
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  deploy:
+    runs-on: self-hosted
 
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-          cache: "npm"
-
       - name: Install Dependencies
-        run: npm ci
+        run: |
+          npm install
+          npm run build
 
-      - name: Build React App
-        run: npm run build  # produces dist/ (Vite)
+      - name: Restart PM2 App
+        run: |
+          pm2 delete atomlift || true
 
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: atomlift-fe-build
-          path: dist/
-          retention-days: 3
+# name: CI/CD Deploy Atom Lift Frontend to EC2
+
+# on:
+#   push:
+#     branches: [main]
+
+# jobs:
+#   build:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout Code
+#         uses: actions/checkout@v4
+
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: 18
+#           cache: "npm"
+
+#       - name: Install Dependencies
+#         run: npm ci
+
+#       - name: Build React App
+#         run: npm run build  # produces dist/ (Vite)
+
+#       - name: Upload Build Artifact
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: atomlift-fe-build
+#           path: dist/
+#           retention-days: 3
 
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
+#   deploy:
+#     needs: build
+#     runs-on: ubuntu-latest
 
-    steps:
-      - name: Download Build from CI
-        uses: actions/download-artifact@v4
-        with:
-          name: atomlift-fe-build
-          path: dist/
+#     steps:
+#       - name: Download Build from CI
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: atomlift-fe-build
+#           path: dist/
 
-      - name: Copy Build to EC2 (SCP)
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: 22
-          timeout: 120s
-          command_timeout: 30m
-          source: "dist/"
-          target: "/home/ec2-user/atomlift-fe/dist/"
+#       - name: Copy Build to EC2 (SCP)
+#         uses: appleboy/scp-action@master
+#         with:
+#           host: ${{ secrets.EC2_HOST }}
+#           username: ${{ secrets.EC2_USER }}
+#           key: ${{ secrets.EC2_SSH_KEY }}
+#           port: 22
+#           timeout: 120s
+#           command_timeout: 30m
+#           source: "dist/"
+#           target: "/home/ec2-user/atomlift-fe/dist/"
 
-      - name: Restart App on EC2 (SSH)
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: 22
-          timeout: 120s
-          command_timeout: 30m
-          script: |
-            set -e
-            echo "🚀 Connected to EC2"
-            cd /home/ec2-user/atomlift-fe
+#       - name: Restart App on EC2 (SSH)
+#         uses: appleboy/ssh-action@master
+#         with:
+#           host: ${{ secrets.EC2_HOST }}
+#           username: ${{ secrets.EC2_USER }}
+#           key: ${{ secrets.EC2_SSH_KEY }}
+#           port: 22
+#           timeout: 120s
+#           command_timeout: 30m
+#           script: |
+#             set -e
+#             echo "🚀 Connected to EC2"
+#             cd /home/ec2-user/atomlift-fe
             
-            echo "🔁 Restarting PM2..."
-            pm2 delete atomlift || true
-            pm2 start npm --name atomlift -- run start
-            pm2 save
+#             echo "🔁 Restarting PM2..."
+#             pm2 delete atomlift || true
+#             pm2 start npm --name atomlift -- run start
+#             pm2 save
 
-            echo "✅ Deployment Successful!"
+#             echo "✅ Deployment Successful!"
